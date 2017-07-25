@@ -9,8 +9,8 @@
 #include <arpa/inet.h>
 
 struct p_header{
-	struct in_addr p_ip_s;
-	struct in_addr p_ip_d;
+	struct in_addr  p_ip_s;
+	struct in_addr  p_ip_d;
 	u_int8_t p;
 	u_int8_t p_prot;
 	u_short p_len;
@@ -90,6 +90,7 @@ void my_tcp_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet,struct
 	struct my_tcp *header_tcp; char*for_check, *tmp;
 	unsigned short test=0;
 	header_tcp=(struct my_tcp*)(packet+sizeof(struct my_ether)+sizeof(struct my_ip));
+	//test=header_tcp->th_sum; header_tcp->th_sum=0;
 	for_check=malloc(sizeof(struct p_header)+sizeof(struct my_tcp));
 	memcpy(for_check,add,sizeof(struct p_header));
 	tmp=for_check+sizeof(struct p_header);
@@ -112,20 +113,21 @@ void my_ip_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
 	add->p_ip_d=header->ip_dst;
 	add->p=0;
 	add->p_prot=header->ip_p;
-	add->p_len=(u_short)(sizeof(packet)-sizeof(struct my_ether)-sizeof(struct my_ip));
+	add->p_len=(u_short)(htons(header->ip_len)-IP_HL(header)<<2)+((u_short)(sizeof(struct p_header)));
 	if(header->ip_p==6){
 		my_tcp_header(arg, pthdr,packet,add);
 	}
 	if(header->ip_p==17){
 		my_udp_header(arg,pthdr,packet,add);
 	}
-	test=checksum((unsigned short*)header,(unsigned int)IP_HL(header));
+	test=header->ip_sum; header->ip_sum=0;
+	header->ip_sum=checksum((unsigned short*)header,(unsigned int)IP_HL(header)<<2);
 	printf("-------data_IP-------\n");
 	printf("IP-address destination:%s\n",inet_ntoa(header->ip_dst));
 	printf("IP-address sender:%s\n",inet_ntoa(header->ip_src));
 	printf("Protocol:%d\n",header->ip_p);
-	printf("IP Checksumm:%d\n",header->ip_sum);
-	printf("My Ip checksumm:%d\n",test);
+	printf("IP Checksumm:%d\n",test);
+	printf("My Ip checksumm:%d\n",header->ip_sum);
 	printf("-----------------------\n");
 
 }
@@ -156,7 +158,7 @@ void print_pack(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
 int main()
 {
 	char *dev; char errbuf[PCAP_ERRBUF_SIZE];
-	char buf_filter[]="ip"; u_char *user;
+	char buf_filter[]="tcp"; u_char *user;
 	bpf_u_int32 mask, net;
 	pcap_t *pcap_fd;
 	struct bpf_program fp;
