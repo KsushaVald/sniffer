@@ -9,8 +9,8 @@
 #include <arpa/inet.h>
 
 struct p_header{
-	struct in_addr  p_ip_s;
-	struct in_addr  p_ip_d;
+	unsigned int  p_ip_s;
+	unsigned int  p_ip_d;
 	u_int8_t p;
 	u_int8_t p_prot;
 	u_short p_len;
@@ -33,7 +33,7 @@ struct my_ip{
 	u_int8_t ip_ttl;
 	u_int8_t ip_p;
 	u_int16_t ip_sum;
-	struct in_addr ip_src, ip_dst;
+	unsigned int  ip_src, ip_dst;
 }__attribute__((packed));
 
 struct my_tcp{
@@ -72,40 +72,47 @@ static unsigned short checksum(unsigned short *ptr,unsigned int size){
 }
 
 void my_udp_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet,  struct p_header *add){
-	struct my_udp *header_udp; char*for_check, *tmp;
+	struct my_udp *header_udp; char*for_check; int size_header;
+	unsigned short test;
+	size_header=sizeof(struct my_ether)+sizeof(struct my_ip)+sizeof(struct my_udp);
 	header_udp=(struct my_udp*)(packet+sizeof(struct my_ether)+sizeof(struct my_ip));
-	for_check=malloc(sizeof(struct p_header)+sizeof(struct my_udp));
-        memcpy(for_check,add,sizeof(struct p_header));
-        tmp=for_check+sizeof(struct p_header);
-        memcpy(tmp,header_udp,sizeof(struct my_udp));
+	test=header_udp->u_sum;
+	header_udp->u_sum=0;
+	for_check=malloc(sizeof(struct p_header)+add->p_len);
+	memcpy(for_check,add,sizeof(struct p_header));
+	memcpy(for_check+sizeof(struct p_header),header_udp,add->p_len);
+	header_udp->u_sum=checksum((unsigned short*)for_check,add->p_len+sizeof(struct p_header));
 	printf("-------data_UDP-------\n");
 	printf("UDP-port destination:%d\n",ntohs(header_udp->u_dport));
 	printf("UDP-port sender:%d\n", ntohs(header_udp->u_sport));
-	printf("UDP Cheksumm:%d\n", ntohs(header_udp->u_sum));
+	printf("UDP Cheksumm:%d\n", ntohs(test));
+	printf("My udp cheksumm:%d\n", ntohs(header_udp->u_sum));
 	printf("-----------------------\n");
 
 }
 
 void my_tcp_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet,struct p_header *add){
-	struct my_tcp *header_tcp; char*for_check, *tmp;
-	unsigned short test=0;
+	struct my_tcp *header_tcp; char*for_check;
+	unsigned short test=0; int size_header;
+	size_header=sizeof(struct my_ether)+sizeof(struct my_ip)+sizeof(struct my_tcp);
 	header_tcp=(struct my_tcp*)(packet+sizeof(struct my_ether)+sizeof(struct my_ip));
-	//test=header_tcp->th_sum; header_tcp->th_sum=0;
-	for_check=malloc(sizeof(struct p_header)+sizeof(struct my_tcp));
+	test=header_tcp->th_sum;
+	header_tcp->th_sum=0;
+	for_check=malloc(sizeof(struct p_header)+add->p_len);
 	memcpy(for_check,add,sizeof(struct p_header));
-	tmp=for_check+sizeof(struct p_header);
-	memcpy(tmp,header_tcp,sizeof(struct my_tcp));
-	test=checksum((unsigned short*)for_check,(unsigned int)add->p_len);
+	memcpy(for_check+sizeof(struct p_header),header_tcp,sizeof(struct my_tcp));
+	memcpy(for_check+sizeof(struct p_header)+sizeof(struct my_tcp),packet+size_header,add->p_len-sizeof(struct my_tcp));
+	header_tcp->th_sum=checksum((unsigned short*)for_check,(add->p_len+sizeof(struct p_header)));
 	printf("-------data_TCP-------\n");
 	printf("TCP-port destination:%d\n",ntohs(header_tcp->th_dport));
 	printf("TCP-port sender:%d\n", ntohs(header_tcp->th_sport));
-	printf("TCP Cheksumm:%d\n", ntohs(header_tcp->th_sum));
-	printf("My tcp cheksumm:%d\n", ntohs(test));
+	printf("TCP Cheksumm:%d\n", ntohs(test));
+	printf("My tcp cheksumm:%d\n", ntohs(header_tcp->th_sum));
 	printf("-----------------------\n");
 }
 
 void my_ip_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
-	unsigned short  test=0;
+	unsigned short  test=0; struct in_addr  help;
 	struct my_ip *header; struct p_header *add;
 	header=(struct my_ip*)(packet+sizeof(struct my_ether));
 	add=malloc(sizeof(struct p_header));
@@ -113,9 +120,9 @@ void my_ip_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
 	add->p_ip_d=header->ip_dst;
 	add->p=0;
 	add->p_prot=header->ip_p;
-	add->p_len=(u_short)(htons(header->ip_len)-IP_HL(header)<<2)+((u_short)(sizeof(struct p_header)));
+	add->p_len=htons(ntohs(header->ip_len)-(IP_HL(header)<<2));
 	if(header->ip_p==6){
-		my_tcp_header(arg, pthdr,packet,add);
+		my_tcp_header(arg,pthdr,packet,add);
 	}
 	if(header->ip_p==17){
 		my_udp_header(arg,pthdr,packet,add);
@@ -123,8 +130,10 @@ void my_ip_header(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
 	test=header->ip_sum; header->ip_sum=0;
 	header->ip_sum=checksum((unsigned short*)header,(unsigned int)IP_HL(header)<<2);
 	printf("-------data_IP-------\n");
-	printf("IP-address destination:%s\n",inet_ntoa(header->ip_dst));
-	printf("IP-address sender:%s\n",inet_ntoa(header->ip_src));
+	help.s_addr=header->ip_src;
+	printf("IP-address destination:%s\n",inet_ntoa(help));
+	help.s_addr=header->ip_dst;
+	printf("IP-address sender:%s\n",inet_ntoa(help));
 	printf("Protocol:%d\n",header->ip_p);
 	printf("IP Checksumm:%d\n",test);
 	printf("My Ip checksumm:%d\n",header->ip_sum);
@@ -158,7 +167,7 @@ void print_pack(u_char *arg, struct pcap_pkthdr* pthdr, u_char *packet){
 int main()
 {
 	char *dev; char errbuf[PCAP_ERRBUF_SIZE];
-	char buf_filter[]="tcp"; u_char *user;
+	char buf_filter[]="ip"; u_char *user;
 	bpf_u_int32 mask, net;
 	pcap_t *pcap_fd;
 	struct bpf_program fp;
@@ -171,6 +180,6 @@ int main()
 	pcap_fd=pcap_open_live(dev,BUFSIZ,1,0,errbuf);
 	test=pcap_compile(pcap_fd,&fp,buf_filter,0,mask);
 	pcap_setfilter(pcap_fd,&fp);
-	pcap_loop(pcap_fd,2,(pcap_handler)print_pack,user);
+	pcap_loop(pcap_fd,-1,(pcap_handler)print_pack,user);
 }
 
